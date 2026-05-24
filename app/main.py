@@ -37,6 +37,7 @@ from app.models import (
 from app.session_store import InMemorySessionStore
 from app.skills import build_system_prompt, list_available_skills
 from app.tools.registry import get_all_tools
+from app.database import db
 from app import agent, router
 
 # ── Logging ────────────────────────────────────────────────────────────────
@@ -61,10 +62,18 @@ async def lifespan(app: FastAPI):
     logger.info("🚀 Starting Akari Scout AI Agent...")
     logger.info("   Skills available: %s", list_available_skills())
     logger.info("   Tools registered: %d", len(get_all_tools()))
-    logger.info("   Data dir: %s (exists: %s)", settings.DATA_DIR, os.path.isdir(settings.DATA_DIR))
+    logger.info("   Database: %s/%s", settings.DB_SERVER, settings.DB_NAME)
     logger.info("   Router model: %s", settings.ROUTER_MODEL)
     logger.info("   Default model: %s", settings.DEFAULT_MODEL)
+
+    # Connect to Azure SQL database
+    db.connect()
+    logger.info("   Database connected: %s", db.is_connected)
+
     yield
+
+    # Cleanup
+    db.close()
     logger.info("👋 Shutting down Akari Scout AI Agent...")
 
 
@@ -119,7 +128,7 @@ async def health_check():
         status="healthy",
         skills_loaded=list_available_skills(),
         tools_registered=len(get_all_tools()),
-        data_dir_exists=os.path.isdir(settings.DATA_DIR),
+        database_connected=db.is_connected,
     )
 
 

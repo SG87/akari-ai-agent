@@ -88,4 +88,4 @@ class HealthResponse(BaseModel):
     status: str
     skills_loaded: list[str]
     tools_registered: int
-    data_dir_exists: bool
+    database_connected: bool

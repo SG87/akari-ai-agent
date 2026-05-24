@@ -27,12 +27,29 @@ class Settings(BaseSettings):
     WYSCOUT_USERNAME: str = ""
     WYSCOUT_PASSWORD: str = ""
 
-    # ── Data ───────────────────────────────────────────────────────────
-    DATA_DIR: str = "./data"
+    # ── Azure SQL Database ─────────────────────────────────────────────
+    DB_SERVER: str = ""
+    DB_NAME: str = ""
+    DB_USER: str = ""
+    DB_PASSWORD: str = ""
 
     # ── Auth ───────────────────────────────────────────────────────────
     # If set, all endpoints (except /status) require this key in X-API-Key
     API_KEY: str = ""
+
+    @property
+    def connection_string(self) -> str:
+        """Build ODBC connection string for Azure SQL."""
+        return (
+            f"Driver={{ODBC Driver 18 for SQL Server}};"
+            f"Server=tcp:{self.DB_SERVER},1433;"
+            f"Database={self.DB_NAME};"
+            f"Uid={self.DB_USER};"
+            f"Pwd={self.DB_PASSWORD};"
+            f"Encrypt=yes;"
+            f"TrustServerCertificate=no;"
+            f"Connection Timeout=30;"
+        )
 
 
 settings = Settings()

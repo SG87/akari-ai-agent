@@ -38,7 +38,7 @@ POST /chat  →  Router (Haiku)  →  Skills Loader  →  Agent Loop  →  Sessi
 | Runtime | Python 3.10+ |
 | API | FastAPI + Uvicorn |
 | LLM | Anthropic Claude (Haiku / Sonnet / Opus) |
-| Data | Pandas + Parquet (AKARI Algorithm) |
+| Data | Azure SQL (pyodbc) — AKARI Algorithm |
 | External | Transfermarkt (scraping), WyScout API v3 |
 
 ## Quick Start
@@ -69,7 +69,11 @@ akari-ai-agent/
 │   ├── scout-core.md         Base persona & guardrails (always loaded)
 │   ├── scout-search.md       Player search workflow
 │   └── scout-analysis.md     Player analysis & market intelligence
-├── data/                     Parquet data files
+├── sql/
+│   ├── create_views.sql      SQL view definitions (agent_scout_*)
+│   ├── grant_permissions.sql  Admin script to grant DDL rights
+│   └── run_migration.py      Creates views & verifies DB access
+├── data/                     (empty — all data in Azure SQL)
 ├── resources/
 │   ├── setup.md              Detailed API specification
 │   └── akari_session_ui.png  UI mockup
@@ -86,6 +90,7 @@ akari-ai-agent/
         ├── akari_search.py   AKARI DB tools (7 tools)
         ├── transfermarkt.py  Transfermarkt scraper
         └── wyscout.py        WyScout API client
+    ├── database.py           Azure SQL connection & queries
 ```
 
 ## Configuration
@@ -95,7 +100,10 @@ akari-ai-agent/
 | `ANTHROPIC_API_KEY` | ✅ | — | Anthropic API key |
 | `DEFAULT_MODEL` | — | `claude-opus-4-0` | Model for complex queries |
 | `ROUTER_MODEL` | — | `claude-haiku-4-0` | Model for request classification |
-| `DATA_DIR` | — | `./data` | Path to parquet data files |
+| `DB_SERVER` | ✅ | — | Azure SQL server hostname |
+| `DB_NAME` | ✅ | — | Database name |
+| `DB_USER` | ✅ | — | Database user |
+| `DB_PASSWORD` | ✅ | — | Database password |
 | `API_KEY` | — | — | Optional API key protection |
 | `WYSCOUT_USERNAME` | — | — | WyScout API credentials |
 | `WYSCOUT_PASSWORD` | — | — | WyScout API credentials |
