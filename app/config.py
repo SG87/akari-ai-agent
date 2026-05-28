@@ -1,5 +1,9 @@
 """
 Application configuration — loads settings from environment / .env file.
+
+Per-provider model tiers use LiteLLM model strings (e.g.
+'anthropic/claude-opus-4-0', 'gpt-4o'). The LLMProvider enum in models.py
+resolves these into provider-specific properties.
 """
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -14,28 +18,49 @@ class Settings(BaseSettings):
         extra="ignore",
     )
 
-    # ── Anthropic ──────────────────────────────────────────────────────
-    ANTHROPIC_API_KEY: str = ""
+    # ── Auth ───────────────────────────────────────────────────────────
+    API_KEY: str
 
-    # Default model for complex / unclassified queries
-    DEFAULT_MODEL: str = "claude-opus-4-0"
+    # ── LLM API keys ──────────────────────────────────────────────────
+    # LiteLLM reads these from env automatically when calling the
+    # respective provider. Keep them here so pydantic validates presence.
+    ANTHROPIC_API_KEY: str
+    OPENAI_API_KEY: str
+
+    # ── Claude model tiers (LiteLLM strings) ──────────────────────────
+    CLAUDE_SIMPLE_MODEL: str
+    CLAUDE_STANDARD_MODEL: str
+    CLAUDE_COMPLEX_MODEL: str
+
+    # ── GPT model tiers (LiteLLM strings) ─────────────────────────────
+    GPT_SIMPLE_MODEL: str
+    GPT_STANDARD_MODEL: str
+    GPT_COMPLEX_MODEL: str
 
     # Fast model used for the router classifier
-    ROUTER_MODEL: str = "claude-haiku-4-0"
+    ROUTER_MODEL: str
+
+    # ── Langfuse (optional) ────────────────────────────────────────────
+    LANGFUSE_PUBLIC_KEY: str
+    LANGFUSE_SECRET_KEY: str
+    LANGFUSE_HOST: str
 
     # ── WyScout (optional) ─────────────────────────────────────────────
-    WYSCOUT_USERNAME: str = ""
-    WYSCOUT_PASSWORD: str = ""
+    WYSCOUT_USERNAME: str
+    WYSCOUT_PASSWORD: str
 
     # ── Azure SQL Database ─────────────────────────────────────────────
-    DB_SERVER: str = ""
-    DB_NAME: str = ""
-    DB_USER: str = ""
-    DB_PASSWORD: str = ""
+    DB_SERVER: str
+    DB_NAME: str
+    DB_USER: str
+    DB_PASSWORD: str
 
-    # ── Auth ───────────────────────────────────────────────────────────
-    # If set, all endpoints (except /status) require this key in X-API-Key
-    API_KEY: str = ""
+    # ── Derived helpers ────────────────────────────────────────────────
+
+    @property
+    def langfuse_enabled(self) -> bool:
+        """True if Langfuse credentials are configured."""
+        return bool(self.LANGFUSE_PUBLIC_KEY and self.LANGFUSE_SECRET_KEY)
 
     @property
     def connection_string(self) -> str:

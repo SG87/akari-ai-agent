@@ -12,6 +12,21 @@ from typing import Any, Optional
 from app.database import db
 
 
+# Columns returned by search_players (compact summary to reduce token usage).
+# get_player_profile still returns all columns for deep dives.
+_SUMMARY_KEYS = [
+    "Player ID", "Short name", "First name", "Last name",
+    "Age", "Team", "Competition", "Area",
+    "Main position", "Second position", "Foot",
+    "Birth area", "Passport area",
+    "Market value", "Contract expires",
+    "AKARI Skill", "AKARI Potential",
+    "AKARI_Skill_rescaled", "AKARI_Potential_rescaled",
+    "Games played", "Goals", "Assists", "xG ", "xA ",
+    "Season", "TM_id",
+]
+
+
 # ── Helpers ────────────────────────────────────────────────────────────────
 
 def _serialize(data: Any) -> str:
@@ -22,6 +37,11 @@ def _serialize(data: Any) -> str:
             return obj.isoformat()
         return str(obj)
     return json.dumps(data, indent=2, default=default_handler, ensure_ascii=False)
+
+
+def _compact(players: list[dict]) -> list[dict]:
+    """Keep only summary columns to reduce token usage."""
+    return [{k: p[k] for k in _SUMMARY_KEYS if k in p} for p in players]
 
 
 # ── Tool handlers ──────────────────────────────────────────────────────────
@@ -82,7 +102,7 @@ def search_players(
     if not results and not db.is_connected:
         return _serialize({"error": "Database not connected. Check DB_SERVER, DB_USER, DB_PASSWORD in .env."})
 
-    return _serialize({"count": len(results), "players": results})
+    return _serialize({"count": len(results), "players": _compact(results)})
 
 
 def get_player_profile(player_id: float) -> str:

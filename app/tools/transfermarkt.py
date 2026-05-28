@@ -7,6 +7,7 @@ No API key required. Uses browser-like headers to avoid blocks.
 Ported from the akari-scout codebase.
 """
 
+import asyncio
 import json
 import re
 from typing import Any, Optional
@@ -31,6 +32,11 @@ _HEADERS = {
 
 _TIMEOUT = 30.0
 
+# Shared HTTP client — reused across requests for connection pooling
+_http_client = httpx.AsyncClient(
+    headers=_HEADERS, timeout=_TIMEOUT, follow_redirects=True
+)
+
 
 def _serialize(data: Any) -> str:
     """Serialize data to JSON string."""
@@ -47,12 +53,9 @@ def _serialize(data: Any) -> str:
 async def _fetch(path: str, params: Optional[dict] = None) -> BeautifulSoup:
     """GET a page and return a BeautifulSoup tree."""
     url = f"{_BASE}{path}" if path.startswith("/") else path
-    async with httpx.AsyncClient(
-        headers=_HEADERS, timeout=_TIMEOUT, follow_redirects=True
-    ) as client:
-        resp = await client.get(url, params=params)
-        resp.raise_for_status()
-        return BeautifulSoup(resp.text, "html.parser")
+    resp = await _http_client.get(url, params=params)
+    resp.raise_for_status()
+    return BeautifulSoup(resp.text, "html.parser")
 
 
 def _clean(text: str) -> str:
@@ -209,12 +212,9 @@ async def _get_player_injuries(player_id: int) -> list[dict]:
 async def _get_player_transfers(player_id: int) -> list[dict]:
     """Get a player's transfer history via Transfermarkt's ceAPI."""
     url = f"{_BASE}/ceapi/transferHistory/list/{player_id}"
-    async with httpx.AsyncClient(
-        headers=_HEADERS, timeout=_TIMEOUT, follow_redirects=True
-    ) as client:
-        resp = await client.get(url)
-        resp.raise_for_status()
-        data = resp.json()
+    resp = await _http_client.get(url)
+    resp.raise_for_status()
+    data = resp.json()
 
     transfers: list[dict] = []
     for t in data.get("transfers", []):
@@ -291,22 +291,17 @@ async def check_transfermarkt(
     # Fetch profile, injuries, and transfers in parallel
     report: dict[str, Any] = {"player_name": player_name, "transfermarkt_id": player_id}
 
-    try:
-        profile = await _get_player_profile(player_id)
-        report["profile"] = profile
-    except Exception as e:
-        report["profile_error"] = str(e)
+    results = await asyncio.gather(
+        _get_player_profile(player_id),
+        _get_player_injuries(player_id),
+        _get_player_transfers(player_id),
+        return_exceptions=True,
+    )
 
-    try:
-        injuries = await _get_player_injuries(player_id)
-        report["injuries"] = injuries
-    except Exception as e:
-        report["injuries_error"] = str(e)
-
-    try:
-        transfers = await _get_player_transfers(player_id)
-        report["transfers"] = transfers
-    except Exception as e:
-        report["transfers_error"] = str(e)
+    for key, value in zip(["profile", "injuries", "transfers"], results):
+        if isinstance(value, Exception):
+            report[f"{key}_error"] = str(value)
+        else:
+            report[key] = value
 
     return _serialize(report)

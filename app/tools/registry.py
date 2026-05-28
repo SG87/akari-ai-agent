@@ -37,12 +37,15 @@ def _register(tool: ToolDefinition) -> None:
 
 
 def get_all_tools() -> list[dict[str, Any]]:
-    """Return all tool schemas in Anthropic format."""
+    """Return all tool schemas in OpenAI function-calling format."""
     return [
         {
-            "name": t.name,
-            "description": t.description,
-            "input_schema": t.input_schema,
+            "type": "function",
+            "function": {
+                "name": t.name,
+                "description": t.description,
+                "parameters": t.input_schema,
+            },
         }
         for t in _TOOLS.values()
     ]
@@ -79,28 +82,60 @@ def _init_tools() -> None:
             "Search the AKARI database for players matching specific criteria. "
             "Supports filtering by name, position, age range, nationality, competition, "
             "area (country/market), team, foot, season, AKARI scores, market value, "
-            "and minimum games played. Use discover_values() first to look up valid "
-            "parameter values. Multi-value support: position and nationality accept "
-            "comma-separated values."
+            "and minimum games played. Multi-value support: position and nationality "
+            "accept comma-separated values. You can search directly without calling "
+            "discover_values first — common valid values are listed in the parameter "
+            "descriptions below."
         ),
         input_schema={
             "type": "object",
             "properties": {
                 "name": {"type": "string", "description": "Player name (partial match)"},
-                "position": {"type": "string", "description": "Position(s), comma-separated"},
+                "position": {
+                    "type": "string",
+                    "description": (
+                        "Position(s), comma-separated. Valid values: "
+                        "Left Winger, Right Winger, Centre Forward, Striker, "
+                        "Attacking Midfielder, Central Midfielder, Defensive Midfielder, "
+                        "Left Midfielder, Right Midfielder, "
+                        "Left Back, Right Back, Centre Back, Goalkeeper"
+                    ),
+                },
                 "min_age": {"type": "integer", "description": "Minimum age"},
                 "max_age": {"type": "integer", "description": "Maximum age"},
-                "nationality": {"type": "string", "description": "Nationality(s), comma-separated"},
-                "competition": {"type": "string", "description": "Specific league name"},
-                "area": {"type": "string", "description": "Country/market (e.g. 'Croatia', 'Belgium')"},
+                "nationality": {"type": "string", "description": "Nationality(s), comma-separated (e.g. 'Croatia', 'Belgium', 'Brazil')"},
+                "competition": {
+                    "type": "string",
+                    "description": (
+                        "League name. Common values: "
+                        "Superleague (Croatia), 1. SNL (Slovenia), Bundesliga (Austria/Germany), "
+                        "Super Liga (Serbia), Pro League (Belgium), Eredivisie (Netherlands), "
+                        "Premier League (England), Ligue 1 (France), Serie A (Italy), "
+                        "LaLiga (Spain), Liga Portugal, Super Lig (Turkey), "
+                        "Ekstraklasa (Poland), Allsvenskan (Sweden), "
+                        "MLS (USA), J1 League (Japan), Liga MX (Mexico). "
+                        "You can also pass a country name to the 'area' parameter instead."
+                    ),
+                },
+                "area": {"type": "string", "description": "Country/market (e.g. 'Croatia', 'Belgium', 'Germany')"},
                 "team": {"type": "string", "description": "Team name"},
                 "foot": {"type": "string", "enum": ["left", "right", "both"]},
-                "season": {"type": "string", "description": "Season (e.g. '2025-2026')"},
-                "min_akari_skill_rescaled": {"type": "number", "description": "Minimum AKARI Skill (rescaled)"},
-                "min_akari_potential_rescaled": {"type": "number", "description": "Minimum AKARI Potential (rescaled)"},
+                "season": {
+                    "type": "string",
+                    "description": "Season identifier (e.g. '2024-2025', '2025', '2025-2026', '2026')",
+                },
+                "min_akari_skill_rescaled": {"type": "number", "description": "Minimum AKARI Skill (rescaled 0-100)"},
+                "min_akari_potential_rescaled": {"type": "number", "description": "Minimum AKARI Potential (rescaled 0-100)"},
                 "max_market_value": {"type": "number", "description": "Maximum market value in EUR"},
                 "min_games_played": {"type": "integer", "description": "Minimum games played"},
-                "sort_by": {"type": "string", "description": "Column to sort by (default: 'AKARI Potential')"},
+                "sort_by": {
+                    "type": "string",
+                    "description": (
+                        "Column to sort by (default: 'AKARI Potential'). "
+                        "Options: 'AKARI Potential', 'AKARI Skill', 'Goals', 'Assists', "
+                        "'xG ', 'xA ', 'Market value', 'Age', 'Games played'"
+                    ),
+                },
                 "limit": {"type": "integer", "description": "Max results (default: 20)"},
             },
             "required": [],

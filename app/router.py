@@ -2,18 +2,21 @@
 Router — Haiku-based request classifier for model and skill selection.
 
 Classifies incoming user messages by complexity to select:
-1. Which Anthropic model to use (Haiku / Sonnet / Opus)
+1. Which model to use (from the provider's tier → model mapping)
 2. Which skill files to inject into the system prompt
 3. A suggested session label (for the first message in a new session)
+
+The classifier runs on the ROUTER_MODEL (default: claude-haiku) via LiteLLM.
 """
 
 import json
 import logging
 from dataclasses import dataclass, field
 
-import anthropic
+import litellm
 
 from app.config import settings
+from app.models import LLMProvider
 
 logger = logging.getLogger("akari.router")
 
@@ -27,14 +30,6 @@ class RouterResult:
     suggested_label: str | None = None
     tier: str = "STANDARD"
 
-
-# ── Model mapping ─────────────────────────────────────────────────────────
-
-_TIER_MODELS = {
-    "SIMPLE": "claude-haiku-4-0",
-    "STANDARD": "claude-sonnet-4-20250514",
-    "COMPLEX": settings.DEFAULT_MODEL,  # claude-opus-4-0
-}
 
 _CLASSIFIER_PROMPT = """\
 You are a request classifier for a football scouting AI called Akari Scout.
@@ -72,30 +67,35 @@ Respond with ONLY a JSON object, no other text:
 async def classify(
     user_message: str,
     conversation_history: list[dict] | None = None,
+    provider: LLMProvider = LLMProvider.CLAUDE,
 ) -> RouterResult:
     """Classify a user message to determine model, skills, and session label.
 
     Args:
         user_message: The latest user message.
         conversation_history: Optional prior messages for context.
+        provider: The LLM provider — determines which model tier
+                  mapping is used for the selected tier.
 
     Returns:
         RouterResult with model, skills, suggested_label, and tier.
     """
-    # Build the classifier messages
-    messages = [{"role": "user", "content": user_message}]
-
     try:
-        client = anthropic.AsyncAnthropic(api_key=settings.ANTHROPIC_API_KEY)
-        response = await client.messages.create(
+        response = await litellm.acompletion(
             model=settings.ROUTER_MODEL,
+            messages=[
+                {"role": "system", "content": _CLASSIFIER_PROMPT},
+                {"role": "user", "content": user_message},
+            ],
             max_tokens=256,
-            system=_CLASSIFIER_PROMPT,
-            messages=messages,
+            metadata={
+                "trace_name": "akari-router",
+                "generation_name": "router-classify",
+            },
         )
 
         # Parse the JSON response
-        raw_text = response.content[0].text.strip()
+        raw_text = response.choices[0].message.content.strip()
 
         # Handle potential markdown code block wrapping
         if raw_text.startswith("```"):
@@ -104,8 +104,8 @@ async def classify(
         result = json.loads(raw_text)
 
         tier = result.get("tier", "STANDARD").upper()
-        if tier not in _TIER_MODELS:
-            tier = "STANDARD"
+        if tier not in provider.tier_models:
+            tier = "COMPLEX"
 
         skills = result.get("skills", [])
         if not isinstance(skills, list):
@@ -113,23 +113,25 @@ async def classify(
 
         label = result.get("label")
 
+        selected_model = provider.get_model_for_tier(tier)
+
         logger.info(
-            "ROUTER | tier=%s | model=%s | skills=%s | label=%s",
-            tier, _TIER_MODELS[tier], skills, label,
+            "ROUTER | provider=%s | tier=%s | model=%s | skills=%s | label=%s",
+            provider.value, tier, selected_model, skills, label,
         )
 
         return RouterResult(
-            model=_TIER_MODELS[tier],
+            model=selected_model,
             skills=skills,
             suggested_label=label,
             tier=tier,
         )
 
     except Exception as e:
-        # On any failure, fall back to defaults (Opus + all skills)
+        # On any failure, fall back to defaults (Complex + all skills)
         logger.warning("ROUTER_FALLBACK | error=%s — defaulting to COMPLEX", str(e))
         return RouterResult(
-            model=settings.DEFAULT_MODEL,
+            model=provider.get_model_for_tier("COMPLEX"),
             skills=["scout-search", "scout-analysis"],
             suggested_label=None,
             tier="COMPLEX",

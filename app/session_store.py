@@ -65,7 +65,13 @@ class InMemorySessionStore:
         start = (page - 1) * count
         end = start + count
         return [
-            SessionSummary(id=s.id, label=s.label)
+            SessionSummary(
+                id=s.id,
+                label=s.label,
+                message_count=len(s.messages),
+                created_at=s.created_at,
+                updated_at=s.updated_at,
+            )
             for s in tenant_sessions[start:end]
         ]
 

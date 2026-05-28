@@ -16,12 +16,13 @@ Start with:
 
 import logging
 import os
+import uuid
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 
-from fastapi import Depends, FastAPI, HTTPException, Query, Request, Security
+import litellm
+from fastapi import Depends, FastAPI, HTTPException, Query, Security
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
 from fastapi.security import APIKeyHeader
 
 from app.config import settings
@@ -30,6 +31,7 @@ from app.models import (
     ChatResponse,
     CreateSessionRequest,
     HealthResponse,
+    LLMProvider,
     Message,
     SessionSummary,
     UpdateSessionRequest,
@@ -64,7 +66,32 @@ async def lifespan(app: FastAPI):
     logger.info("   Tools registered: %d", len(get_all_tools()))
     logger.info("   Database: %s/%s", settings.DB_SERVER, settings.DB_NAME)
     logger.info("   Router model: %s", settings.ROUTER_MODEL)
-    logger.info("   Default model: %s", settings.DEFAULT_MODEL)
+
+    for p in LLMProvider:
+        logger.info(
+            "   %s models: simple=%s | standard=%s | complex=%s",
+            p.value.upper(), p.simple_model, p.standard_model, p.complex_model,
+        )
+
+    # Initialize Langfuse tracing (if configured)
+    if settings.langfuse_enabled:
+        litellm.success_callback = ["langfuse"]
+        litellm.failure_callback = ["langfuse"]
+        # LiteLLM's Langfuse callback reads these from os.environ directly
+        os.environ.setdefault("LANGFUSE_PUBLIC_KEY", settings.LANGFUSE_PUBLIC_KEY)
+        os.environ.setdefault("LANGFUSE_SECRET_KEY", settings.LANGFUSE_SECRET_KEY)
+        os.environ.setdefault("LANGFUSE_HOST", settings.LANGFUSE_HOST)
+        logger.info("   Langfuse: enabled (%s)", settings.LANGFUSE_HOST)
+    else:
+        logger.info("   Langfuse: disabled (no keys configured)")
+
+    # Export LLM API keys to os.environ so LiteLLM can find them.
+    # Pydantic loads .env into the Settings object, but LiteLLM reads
+    # os.environ directly — bridge the gap here.
+    if settings.ANTHROPIC_API_KEY:
+        os.environ.setdefault("ANTHROPIC_API_KEY", settings.ANTHROPIC_API_KEY)
+    if settings.OPENAI_API_KEY:
+        os.environ.setdefault("OPENAI_API_KEY", settings.OPENAI_API_KEY)
 
     # Connect to Azure SQL database
     db.connect()
@@ -83,9 +110,9 @@ app = FastAPI(
     title="Akari Scout AI Agent",
     description=(
         "AI-powered football scouting agent with session management, "
-        "powered by the AKARI Algorithm and Anthropic Claude."
+        "powered by the AKARI Algorithm. Supports Claude (Anthropic) and GPT (OpenAI)."
     ),
-    version="1.0.0",
+    version="2.0.0",
     lifespan=lifespan,
 )
 
@@ -203,33 +230,50 @@ async def chat(
     body: ChatRequest,
     tenantId: str = Query(..., description="Tenant ID"),
     sessionId: str = Query(..., description="Session ID"),
+    provider: LLMProvider | None = Query(
+        None,
+        description="LLM provider (overrides body)",
+    ),
     _key: str = Depends(require_api_key),
 ):
     """Send a message to the Akari Scout AI agent.
 
     Flow:
-    1. Load session history
-    2. Classify request (router) → select model + skills
-    3. Auto-label session on first message
-    4. Build system prompt from selected skills
-    5. Run agent loop with tools
-    6. Persist messages to session
-    7. Return response
+    1. Resolve provider (query param > body field)
+    2. Validate provider API key
+    3. Load session history
+    4. Classify request (router) → select model + skills
+    5. Auto-label session on first message
+    6. Build system prompt from selected skills
+    7. Run agent loop with tools (via LiteLLM)
+    8. Persist messages to session
+    9. Return response
     """
-    # 1. Load session
+    # 1. Resolve provider: query param takes precedence over body field
+    effective_provider = provider or body.provider
+
+    # 2. Validate provider API key is configured
+    try:
+        effective_provider.validate_api_key()
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e))
+
+    # 3. Load session
     session = session_store.get_session(tenantId, sessionId)
     if session is None:
         raise HTTPException(status_code=404, detail="Session not found")
 
-    # 2. Route — classify complexity, select model + skills
-    route_result = await router.classify(body.message)
+    # 4. Route — classify complexity, select model + skills for this provider
+    route_result = await router.classify(body.message, provider=effective_provider)
+    effective_model = route_result.model
 
     logger.info(
-        "CHAT | tenant=%s | session=%s | tier=%s | model=%s | skills=%s",
-        tenantId, sessionId, route_result.tier, route_result.model, route_result.skills,
+        "CHAT | tenant=%s | session=%s | provider=%s | tier=%s | model=%s | skills=%s",
+        tenantId, sessionId, effective_provider.value, route_result.tier,
+        effective_model, route_result.skills,
     )
 
-    # 3. Auto-label on first message if session has default label
+    # 5. Auto-label on first message if session has default label
     if (
         len(session.messages) == 0
         and route_result.suggested_label
@@ -237,42 +281,64 @@ async def chat(
     ):
         session_store.update_session_label(tenantId, sessionId, route_result.suggested_label)
 
-    # 4. Build system prompt
+    # 7. Build system prompt
     system_prompt = build_system_prompt(route_result.skills)
 
-    # 5. Convert session history to Anthropic format
-    anthropic_messages: list[dict] = []
+    # 8. Convert session history to message format
+    history_messages: list[dict] = []
     for msg in session.messages:
-        anthropic_messages.append({
+        history_messages.append({
             "role": msg.persona,
             "content": msg.message,
         })
     # Add the current user message
-    anthropic_messages.append({"role": "user", "content": body.message})
+    history_messages.append({"role": "user", "content": body.message})
 
-    # 6. Run agent
+    # 9. Build trace context for Langfuse
+    trace_context = {
+        "trace_id": str(uuid.uuid4()),
+        "session_id": sessionId,
+        "tenant_id": tenantId,
+        "tier": route_result.tier,
+    }
+
+    # 10. Run agent (via LiteLLM)
     tools = get_all_tools()
     agent_response = await agent.run_agent(
         system_prompt=system_prompt,
-        messages=anthropic_messages,
+        messages=history_messages,
         tools=tools,
-        model=route_result.model,
+        model=effective_model,
+        trace_context=trace_context,
     )
 
-    # 7. Persist messages
+    # 11. Persist messages
     now = datetime.now(timezone.utc)
     user_msg = Message(persona="user", message=body.message, timestamp=body.timestamp or now)
-    assistant_msg = Message(persona="assistant", message=agent_response.text, timestamp=now)
+    assistant_msg = Message(
+        persona="assistant",
+        message=agent_response.text,
+        timestamp=now,
+        metadata={
+            "model": agent_response.model,
+            "provider": effective_provider.value,
+            "tier": route_result.tier,
+            "tools_called": agent_response.tool_calls,
+            "iterations": agent_response.iterations,
+            "usage": agent_response.usage,
+        },
+    )
     session_store.append_message(tenantId, sessionId, user_msg)
     session_store.append_message(tenantId, sessionId, assistant_msg)
 
-    # 8. Return response
+    # 12. Return response
     return ChatResponse(
         persona="assistant",
         message=agent_response.text,
         timestamp=now,
         metadata={
             "model": agent_response.model,
+            "provider": effective_provider.value,
             "tier": route_result.tier,
             "tools_called": agent_response.tool_calls,
             "iterations": agent_response.iterations,
