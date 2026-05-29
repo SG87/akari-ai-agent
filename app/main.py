@@ -76,12 +76,17 @@ async def lifespan(app: FastAPI):
 
     # Initialize Langfuse tracing (if configured)
     if settings.langfuse_enabled:
-        litellm.success_callback = ["langfuse"]
-        litellm.failure_callback = ["langfuse"]
-        # LiteLLM's Langfuse callback reads these from os.environ directly
+        # Export keys so Langfuse SDK can find them
         os.environ.setdefault("LANGFUSE_PUBLIC_KEY", settings.LANGFUSE_PUBLIC_KEY)
         os.environ.setdefault("LANGFUSE_SECRET_KEY", settings.LANGFUSE_SECRET_KEY)
         os.environ.setdefault("LANGFUSE_HOST", settings.LANGFUSE_HOST)
+
+        # Use Langfuse v4's native callback handler (not litellm's built-in
+        # "langfuse" string which is incompatible with langfuse v4).
+        from langfuse.litellm import LangfuseLiteLLM
+        langfuse_handler = LangfuseLiteLLM()
+        litellm.success_callback = [langfuse_handler]
+        litellm.failure_callback = [langfuse_handler]
         logger.info("   Langfuse: enabled (%s)", settings.LANGFUSE_HOST)
     else:
         logger.info("   Langfuse: disabled (no keys configured)")
