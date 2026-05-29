@@ -25,7 +25,7 @@ class SessionStore(Protocol):
     """Interface for session storage backends."""
 
     def list_sessions(
-        self, tenant_id: str, count: int = 10, page: int = 1
+        self, tenant_id: str, user_id: str, count: int = 10, page: int = 1
     ) -> list[SessionSummary]: ...
 
     def get_session(
@@ -60,11 +60,12 @@ class InMemorySessionStore:
         self._sessions: dict[tuple[str, str], Session] = {}
 
     def list_sessions(
-        self, tenant_id: str, count: int = 10, page: int = 1
+        self, tenant_id: str, user_id: str, count: int = 10, page: int = 1
     ) -> list[SessionSummary]:
-        """Return a paginated list of session summaries for a tenant."""
+        """Return a paginated list of session summaries for a tenant and user."""
         tenant_sessions = sorted(
-            (s for s in self._sessions.values() if s.tenant_id == tenant_id),
+            (s for s in self._sessions.values()
+             if s.tenant_id == tenant_id and s.user_id == user_id),
             key=lambda s: s.updated_at,
             reverse=True,
         )
@@ -228,19 +229,21 @@ class CosmosSessionStore:
     # ── Protocol methods ───────────────────────────────────────────────
 
     def list_sessions(
-        self, tenant_id: str, count: int = 10, page: int = 1
+        self, tenant_id: str, user_id: str, count: int = 10, page: int = 1
     ) -> list[SessionSummary]:
-        """Return a paginated list of session summaries for a tenant."""
+        """Return a paginated list of session summaries for a tenant and user."""
         offset = (page - 1) * count
         query = (
             "SELECT c.id, c.tenantId, c.userId, c.label, "
             "ARRAY_LENGTH(c.messages) AS messageCount, "
             "c.createdAt, c.updatedAt "
             "FROM c "
+            "WHERE c.userId = @userId "
             "ORDER BY c.updatedAt DESC "
             "OFFSET @offset LIMIT @limit"
         )
         parameters = [
+            {"name": "@userId", "value": user_id},
             {"name": "@offset", "value": offset},
             {"name": "@limit", "value": count},
         ]

@@ -170,8 +170,8 @@ async def list_sessions(
     page: int = Query(1, description="Page number"),
     _key: str = Depends(require_api_key),
 ):
-    """Get a paginated list of sessions for a tenant."""
-    return session_store.list_sessions(tenantId, count, page)
+    """Get a paginated list of sessions for a tenant and user."""
+    return session_store.list_sessions(tenantId, userId, count, page)
 
 
 @app.get("/sessions/{sessionId}", tags=["Sessions"])
