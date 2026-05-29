@@ -116,6 +116,14 @@ func start
 - **Swagger docs**: http://localhost:8000/docs
 - **Health check**: http://localhost:8000/status
 
+### Deploy to Azure
+
+```bash
+func azure functionapp publish akari-ai-agent --subscription eb471083-9c71-4d32-b8ca-b9411ae0b095
+```
+
+> See [Deployment (Azure Functions)](#deployment-azure-functions) for full setup instructions.
+
 ---
 
 ## Deployment (Azure Functions)

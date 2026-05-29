@@ -36,7 +36,7 @@ from app.models import (
     SessionSummary,
     UpdateSessionRequest,
 )
-from app.session_store import InMemorySessionStore
+from app.session_store import create_session_store
 from app.skills import build_system_prompt, list_available_skills
 from app.tools.registry import get_all_tools
 from app.database import db
@@ -53,7 +53,7 @@ logger = logging.getLogger("akari.api")
 
 # ── Session store ──────────────────────────────────────────────────────────
 
-session_store = InMemorySessionStore()
+session_store = create_session_store(settings.SESSION_STORE_BACKEND)
 
 
 # ── Lifespan ───────────────────────────────────────────────────────────────
@@ -65,6 +65,7 @@ async def lifespan(app: FastAPI):
     logger.info("   Skills available: %s", list_available_skills())
     logger.info("   Tools registered: %d", len(get_all_tools()))
     logger.info("   Database: %s/%s", settings.DB_SERVER, settings.DB_NAME)
+    logger.info("   Session store: %s", settings.SESSION_STORE_BACKEND)
     logger.info("   Router model: %s", settings.ROUTER_MODEL)
 
     for p in LLMProvider:

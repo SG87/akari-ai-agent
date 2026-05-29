@@ -55,6 +55,13 @@ class Settings(BaseSettings):
     DB_USER: str = ""
     DB_PASSWORD: str = ""
 
+    # ── Azure Cosmos DB (session storage) ─────────────────────────────
+    COSMOS_ENDPOINT: str = ""
+    COSMOS_KEY: str = ""
+    COSMOS_DATABASE: str = "akari_sessions"
+    COSMOS_CONTAINER: str = "sessions"
+    SESSION_STORE_BACKEND: str = "memory"  # "memory" or "cosmos"
+
     # ── Derived helpers ────────────────────────────────────────────────
 
     @property
