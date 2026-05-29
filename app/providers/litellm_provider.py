@@ -95,7 +95,7 @@ async def run_agent_loop(
         AgentResponse with the final text, tools called, and usage stats.
     """
     tool_calls_made: list[str] = []
-    total_usage: dict = {"input_tokens": 0, "output_tokens": 0}
+    total_usage: dict = {"inputTokens": 0, "outputTokens": 0}
     iteration = 0
 
     # Enable prompt caching for Anthropic models
@@ -151,18 +151,18 @@ async def run_agent_loop(
 
         # Accumulate token usage
         if response.usage:
-            total_usage["input_tokens"] += response.usage.prompt_tokens
-            total_usage["output_tokens"] += response.usage.completion_tokens
+            total_usage["inputTokens"] += response.usage.prompt_tokens
+            total_usage["outputTokens"] += response.usage.completion_tokens
 
             # Log cache stats when available (Anthropic returns these)
             cache_read = getattr(response.usage, "cache_read_input_tokens", None)
             cache_create = getattr(response.usage, "cache_creation_input_tokens", None)
             if cache_read or cache_create:
-                total_usage["cache_read_input_tokens"] = (
-                    total_usage.get("cache_read_input_tokens", 0) + (cache_read or 0)
+                total_usage["cacheReadInputTokens"] = (
+                    total_usage.get("cacheReadInputTokens", 0) + (cache_read or 0)
                 )
-                total_usage["cache_creation_input_tokens"] = (
-                    total_usage.get("cache_creation_input_tokens", 0) + (cache_create or 0)
+                total_usage["cacheCreationInputTokens"] = (
+                    total_usage.get("cacheCreationInputTokens", 0) + (cache_create or 0)
                 )
                 logger.info(
                     "CACHE_STATS | iteration=%d | cache_read=%s | cache_create=%s",

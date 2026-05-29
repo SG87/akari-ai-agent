@@ -15,8 +15,9 @@ from app.config import settings
 
 logger = logging.getLogger("akari.database")
 
-# pyodbc is required for this module
-import pyodbc
+# pyodbc is imported lazily in connect() — the ODBC driver may not
+# be present on all runtimes (e.g. Azure Functions consumption plan).
+pyodbc = None
 
 
 # ── SQL CTE that replicates the agent_scout_players view logic ─────────────
@@ -323,6 +324,15 @@ class Database:
 
     def connect(self):
         """Establish database connection."""
+        global pyodbc
+        if pyodbc is None:
+            try:
+                import pyodbc as _pyodbc
+                pyodbc = _pyodbc
+            except ImportError:
+                logger.warning("pyodbc not available — database features disabled")
+                return
+
         if not settings.DB_SERVER or not settings.DB_PASSWORD:
             logger.warning("Database credentials not configured — cannot connect")
             return

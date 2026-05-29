@@ -1,3 +1,4 @@
+azure-functions>=1.21
 fastapi>=0.136
 uvicorn[standard]>=0.48
 litellm>=1.86

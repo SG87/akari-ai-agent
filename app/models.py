@@ -6,7 +6,8 @@ from datetime import datetime, timezone
 from enum import Enum
 from typing import Literal, Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
+from pydantic.alias_generators import to_camel
 
 
 # ── LLM Provider ──────────────────────────────────────────────────────────
@@ -124,8 +125,14 @@ class Message(BaseModel):
 class Session(BaseModel):
     """Full session with message history."""
 
-    id: str
+    model_config = ConfigDict(
+        alias_generator=to_camel,
+        populate_by_name=True,
+    )
+
+    session_id: str
     tenant_id: str
+    user_id: str
     label: str = Field(default_factory=lambda: datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M"))
     messages: list[Message] = Field(default_factory=list)
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
@@ -135,7 +142,14 @@ class Session(BaseModel):
 class SessionSummary(BaseModel):
     """Lightweight session info for listing."""
 
-    id: str
+    model_config = ConfigDict(
+        alias_generator=to_camel,
+        populate_by_name=True,
+    )
+
+    session_id: str
+    tenant_id: str
+    user_id: str
     label: str
     message_count: int
     created_at: datetime
@@ -145,7 +159,13 @@ class SessionSummary(BaseModel):
 class CreateSessionRequest(BaseModel):
     """Request body for creating a new session."""
 
-    tenant_id: str = Field(..., alias="tenantId")
+    model_config = ConfigDict(
+        alias_generator=to_camel,
+        populate_by_name=True,
+    )
+
+    tenant_id: str
+    user_id: str
     label: Optional[str] = None
 
 
@@ -160,6 +180,11 @@ class UpdateSessionRequest(BaseModel):
 class HealthResponse(BaseModel):
     """Response model for the /status endpoint."""
 
+    model_config = ConfigDict(
+        alias_generator=to_camel,
+        populate_by_name=True,
+    )
+
     status: str
     skills_loaded: list[str]
     tools_registered: int
@@ -172,10 +197,6 @@ class ChatRequest(BaseModel):
     """Request body for the chat endpoint."""
 
     message: str
-    provider: LLMProvider = Field(
-        default=LLMProvider.CLAUDE,
-        description="LLM provider: 'claude' or 'gpt'",
-    )
     timestamp: Optional[datetime] = Field(
         default_factory=lambda: datetime.now(timezone.utc)
     )
@@ -184,6 +205,12 @@ class ChatRequest(BaseModel):
 class ChatResponse(BaseModel):
     """Response body from the chat endpoint."""
 
+    model_config = ConfigDict(
+        alias_generator=to_camel,
+        populate_by_name=True,
+    )
+
+    session_id: str
     persona: str
     message: str
     timestamp: datetime

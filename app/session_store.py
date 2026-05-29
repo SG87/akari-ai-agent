@@ -27,7 +27,7 @@ class SessionStore(Protocol):
     ) -> Session | None: ...
 
     def create_session(
-        self, tenant_id: str, label: str | None = None
+        self, tenant_id: str, user_id: str, label: str | None = None
     ) -> str: ...
 
     def delete_session(
@@ -66,7 +66,9 @@ class InMemorySessionStore:
         end = start + count
         return [
             SessionSummary(
-                id=s.id,
+                session_id=s.session_id,
+                tenant_id=s.tenant_id,
+                user_id=s.user_id,
                 label=s.label,
                 message_count=len(s.messages),
                 created_at=s.created_at,
@@ -82,15 +84,16 @@ class InMemorySessionStore:
         return self._sessions.get((tenant_id, session_id))
 
     def create_session(
-        self, tenant_id: str, label: str | None = None
+        self, tenant_id: str, user_id: str, label: str | None = None
     ) -> str:
         """Create a new session and return its ID."""
         session_id = str(uuid.uuid4())
         now = datetime.now(timezone.utc)
         effective_label = label or now.strftime("%Y-%m-%d %H:%M")
         session = Session(
-            id=session_id,
+            session_id=session_id,
             tenant_id=tenant_id,
+            user_id=user_id,
             label=effective_label,
             messages=[],
             created_at=now,

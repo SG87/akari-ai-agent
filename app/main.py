@@ -3,12 +3,12 @@ Akari Scout AI — FastAPI Application
 
 REST API with:
 - GET  /status                          Health check
-- GET  /sessions?tenantId=...           List sessions
-- GET  /sessions/{sessionId}?tenantId=  Get session with messages
+- GET  /sessions?tenantId=...&userId=...           List sessions
+- GET  /sessions/{sessionId}?tenantId=&userId=  Get session with messages
 - PUT  /sessions                        Create session
-- DELETE /sessions/{sessionId}?tenantId= Delete session
-- PATCH /sessions/{sessionId}?tenantId= Update session label
-- POST /chat?tenantId=...&sessionId=... Chat with the AI agent
+- DELETE /sessions/{sessionId}?tenantId=&userId= Delete session
+- PATCH /sessions/{sessionId}?tenantId=&userId= Update session label
+- POST /chat?tenantId=...&sessionId=...&userId=... Chat with the AI agent
 
 Start with:
     uvicorn app.main:app --reload --port 8000
@@ -164,6 +164,7 @@ async def health_check():
 @app.get("/sessions", response_model=list[SessionSummary], tags=["Sessions"])
 async def list_sessions(
     tenantId: str = Query(..., description="Tenant ID"),
+    userId: str = Query(..., description="User ID"),
     count: int = Query(10, description="Number of sessions to return"),
     page: int = Query(1, description="Page number"),
     _key: str = Depends(require_api_key),
@@ -176,6 +177,7 @@ async def list_sessions(
 async def get_session(
     sessionId: str,
     tenantId: str = Query(..., description="Tenant ID"),
+    userId: str = Query(..., description="User ID"),
     _key: str = Depends(require_api_key),
 ):
     """Get a session with its full message history."""
@@ -183,7 +185,9 @@ async def get_session(
     if session is None:
         raise HTTPException(status_code=404, detail="Session not found")
     return {
-        "id": session.id,
+        "sessionId": session.session_id,
+        "tenantId": session.tenant_id,
+        "userId": session.user_id,
         "label": session.label,
         "messages": [m.model_dump() for m in session.messages],
     }
@@ -192,14 +196,15 @@ async def get_session(
 @app.put("/sessions", tags=["Sessions"])
 async def create_session(body: CreateSessionRequest, _key: str = Depends(require_api_key)):
     """Create a new session for a tenant."""
-    session_id = session_store.create_session(body.tenant_id, body.label)
-    return {"id": session_id}
+    session_id = session_store.create_session(body.tenant_id, body.user_id, body.label)
+    return {"sessionId": session_id}
 
 
 @app.delete("/sessions/{sessionId}", tags=["Sessions"])
 async def delete_session(
     sessionId: str,
     tenantId: str = Query(..., description="Tenant ID"),
+    userId: str = Query(..., description="User ID"),
     _key: str = Depends(require_api_key),
 ):
     """Delete a session."""
@@ -214,6 +219,7 @@ async def update_session(
     sessionId: str,
     body: UpdateSessionRequest,
     tenantId: str = Query(..., description="Tenant ID"),
+    userId: str = Query(..., description="User ID"),
     _key: str = Depends(require_api_key),
 ):
     """Update a session's label."""
@@ -229,19 +235,20 @@ async def update_session(
 async def chat(
     body: ChatRequest,
     tenantId: str = Query(..., description="Tenant ID"),
-    sessionId: str = Query(..., description="Session ID"),
+    userId: str = Query(..., description="User ID"),
+    sessionId: str | None = Query(None, description="Session ID (optional — a new session is created if omitted)"),
     provider: LLMProvider | None = Query(
         None,
-        description="LLM provider (overrides body)",
+        description="LLM provider",
     ),
     _key: str = Depends(require_api_key),
 ):
     """Send a message to the Akari Scout AI agent.
 
     Flow:
-    1. Resolve provider (query param > body field)
+    1. Resolve provider (query param or default)
     2. Validate provider API key
-    3. Load session history
+    3. Load or create session
     4. Classify request (router) → select model + skills
     5. Auto-label session on first message
     6. Build system prompt from selected skills
@@ -249,8 +256,8 @@ async def chat(
     8. Persist messages to session
     9. Return response
     """
-    # 1. Resolve provider: query param takes precedence over body field
-    effective_provider = provider or body.provider
+    # 1. Resolve provider: query param or default to Claude
+    effective_provider = provider or LLMProvider.CLAUDE
 
     # 2. Validate provider API key is configured
     try:
@@ -258,10 +265,14 @@ async def chat(
     except ValueError as e:
         raise HTTPException(status_code=422, detail=str(e))
 
-    # 3. Load session
-    session = session_store.get_session(tenantId, sessionId)
-    if session is None:
-        raise HTTPException(status_code=404, detail="Session not found")
+    # 3. Load or create session
+    if sessionId:
+        session = session_store.get_session(tenantId, sessionId)
+        if session is None:
+            raise HTTPException(status_code=404, detail="Session not found")
+    else:
+        sessionId = session_store.create_session(tenantId, userId)
+        session = session_store.get_session(tenantId, sessionId)
 
     # 4. Route — classify complexity, select model + skills for this provider
     route_result = await router.classify(body.message, provider=effective_provider)
@@ -323,7 +334,7 @@ async def chat(
             "model": agent_response.model,
             "provider": effective_provider.value,
             "tier": route_result.tier,
-            "tools_called": agent_response.tool_calls,
+            "toolsCalled": agent_response.tool_calls,
             "iterations": agent_response.iterations,
             "usage": agent_response.usage,
         },
@@ -333,6 +344,7 @@ async def chat(
 
     # 12. Return response
     return ChatResponse(
+        session_id=sessionId,
         persona="assistant",
         message=agent_response.text,
         timestamp=now,
@@ -340,8 +352,9 @@ async def chat(
             "model": agent_response.model,
             "provider": effective_provider.value,
             "tier": route_result.tier,
-            "tools_called": agent_response.tool_calls,
+            "toolsCalled": agent_response.tool_calls,
             "iterations": agent_response.iterations,
             "usage": agent_response.usage,
         },
     )
+
